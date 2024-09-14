@@ -1,25 +1,43 @@
 service: chromda
 
 custom:
-  s3Bucket: chromda-files
+  # The bucket used for deploying the lambda
+  s3Bucket: bordercore-chromda
+  # The bucket used for creating the thumbnails
+  s3BucketThumbnails: bordercore-blobs
   snsTopic: chromda
 
 provider:
   name: aws
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, "us-east-1"}
   versionFunctions: false
   layers:
     # Google Chrome for AWS Lambda as a layer
     # Make sure you use the latest version depending on the region
     # https://github.com/shelfio/chrome-aws-lambda-layer
-    - arn:aws:lambda:${self:provider.region}:764866452798:layer:chrome-aws-lambda:10
+    - arn:aws:lambda:${self:provider.region}:764866452798:layer:chrome-aws-lambda:47
     # dependencies layer
     - { Ref: ChromdaLambdaLayer }
-  runtime: nodejs12.x
+  runtime: nodejs20.x
   memorySize: 2048
   timeout: 30
   tracing:
     lambda: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:PutObjectAcl
+          # If you plan to support multiple buckets via request parameter,
+          # add all possible buckets here
+          Resource: arn:aws:s3:::${self:custom.s3BucketThumbnails}/*
   # See the API Gateway event below for additional details on api keys
   # apiKeys:
   #   - key1
@@ -28,22 +46,9 @@ functions:
   captureScreenshot:
     handler: src/captureScreenshot.handler
     description: Captures a screenshot of a webpage.
-    iamRoleStatements:
-      - Effect: Allow
-        Action:
-          - xray:PutTraceSegments
-          - xray:PutTelemetryRecords
-        Resource: "*"
-      - Effect: Allow
-        Action:
-          - s3:PutObject
-          - s3:PutObjectAcl
-        # If you plan to support multiple buckets via request parameter,
-        # add all possible buckets here
-        Resource: arn:aws:s3:::${self:custom.s3Bucket}/*
     environment:
       S3_REGION: ${self:provider.region}
-      S3_BUCKET: ${self:custom.s3Bucket}
+      S3_BUCKET: ${self:custom.s3BucketThumbnails}
       # Optional vars
       CHROMIUM_ARGS: "[]"
       TIMEOUT: "30000"

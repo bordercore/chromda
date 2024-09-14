@@ -1,8 +1,8 @@
 const AWSXRay = require("aws-xray-sdk-core");
 AWSXRay.captureHTTPsGlobal(require("https"), true);
 const { URL } = require("url");
-const chromeLambda = require("chrome-aws-lambda");
-const MrPuppetshot = require("mrpuppetshot");
+const chromeLambda = require("@sparticuz/chromium");
+const puppeteer = require("puppeteer-core");
 const normalizeEvent = require("./helpers/normalizeEvent");
 const normalizeResponse = require("./helpers/normalizeResponse");
 const S3Bucket = require("./helpers/s3bucket");
@@ -50,25 +50,20 @@ const defaultViewport = {
   isLandscape: IS_LANDSCAPE
 };
 
-const puppetshot = chromeLambda.executablePath.then(
-  executablePath =>
-    new MrPuppetshot(
-      {
-        executablePath,
-        args: [...chromeLambda.args, ...CHROMIUM_ARGS],
-        headless: true,
-        defaultViewport,
-        ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS,
-        timeout: TIMEOUT
-      },
-      chromeLambda.puppeteer
-    )
-);
-
 /**
  * @type {import('aws-lambda').Handler}
  */
 exports.handler = async (event, callback) => {
+
+  const browser = await puppeteer.launch({
+    args: [...chromeLambda.args, ...CHROMIUM_ARGS],
+    defaultViewport: chromeLambda.defaultViewport,
+    executablePath: await chromeLambda.executablePath(),
+    headless: chromeLambda.headless,
+    ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS,
+    timeout: TIMEOUT
+  });
+
   callback.callbackWaitsForEmptyEventLoop = false;
 
   /** @type {ChromdaOptions} */
@@ -77,8 +72,7 @@ exports.handler = async (event, callback) => {
   // validate URL before wasting time waiting for Chrome to start
   new URL(options?.url);
 
-  const browser = await puppetshot;
-
+  let page;
   await AWSXRay.captureAsyncFunc("navigate", async segment => {
     segment.addAnnotation("url", options.url);
     options.puppeteer?.navigation &&
@@ -86,7 +80,8 @@ exports.handler = async (event, callback) => {
         "options",
         JSON.stringify(options.puppeteer?.navigation)
       );
-    await browser.navigate(options.url, options.puppeteer?.navigation);
+    page = await browser.newPage();
+    await page.goto(options.url, options.puppeteer?.navigation);
     segment.close();
   });
 
@@ -121,7 +116,7 @@ exports.handler = async (event, callback) => {
         break;
       case "viewport":
       default:
-        buffer = await browser.viewportScreenshot(
+        buffer = await page.screenshot(
           options.puppeteer?.screenshot
         );
     }
